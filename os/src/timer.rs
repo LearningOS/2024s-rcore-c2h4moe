@@ -4,7 +4,7 @@ use crate::config::CLOCK_FREQ;
 use crate::sbi::set_timer;
 use riscv::register::time;
 /// The number of ticks per second
-const TICKS_PER_SEC: usize = 100;
+// const TICKS_PER_SEC: usize = 100;
 #[allow(dead_code)]
 /// The number of milliseconds per second
 const MSEC_PER_SEC: usize = 1000;
@@ -31,5 +31,5 @@ pub fn get_time_us() -> usize {
 
 /// Set the next timer interrupt
 pub fn set_next_trigger() {
-    set_timer(get_time() + CLOCK_FREQ / TICKS_PER_SEC);
+    set_timer(get_time() + CLOCK_FREQ * 5);
 }

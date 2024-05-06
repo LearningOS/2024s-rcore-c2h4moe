@@ -12,7 +12,7 @@ pub struct TaskControlBlock {
 }
 
 /// The status of a task
-#[derive(Copy, Clone, PartialEq)]
+#[derive(Copy, Clone, PartialEq, Debug)]
 pub enum TaskStatus {
     /// uninitialized
     UnInit,
