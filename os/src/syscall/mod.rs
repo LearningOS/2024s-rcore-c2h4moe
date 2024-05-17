@@ -56,11 +56,9 @@ mod process;
 
 use fs::*;
 use process::*;
-
-use crate::fs::Stat;
-
 /// handle syscall exception with `syscall_id` and other arguments
 pub fn syscall(syscall_id: usize, args: [usize; 4]) -> isize {
+    TASK_INFO.exclusive_access()[get_current_pid()].syscall_times[syscall_id] += 1;
     match syscall_id {
         SYSCALL_OPEN => sys_open(args[1] as *const u8, args[2] as u32),
         SYSCALL_CLOSE => sys_close(args[0]),

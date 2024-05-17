@@ -9,7 +9,7 @@ APPS := ../user/src/bin/*
 OFFLINE :=
 
 # BOARD
-BOARD := qemu
+BOARD ?= qemu
 SBI ?= rustsbi
 BOOTLOADER := ../bootloader/$(SBI)-$(BOARD).bin
 

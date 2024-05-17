@@ -54,6 +54,47 @@ impl MemorySet {
     pub fn token(&self) -> usize {
         self.page_table.token()
     }
+    /// check if the varea user want to map is already mapped
+    pub fn check_conflict(
+        &mut self,
+        start_va: VirtAddr,
+        end_va: VirtAddr,
+    ) -> bool {
+        let l = start_va.floor();
+        let r = end_va.ceil();
+        if let Some(_) = self
+        .areas
+        .iter()
+        .find(|area| !(area.vpn_range.get_start() >= r || area.vpn_range.get_end() <= l)) {
+            true
+        } else {
+            false
+        }
+    }
+
+    /// unmap an v_area with check if the v_area has been mapped
+    pub fn munmap_with_check(
+        &mut self,
+        start_va: VirtAddr,
+        end_va: VirtAddr,
+    ) -> bool {
+        let l = start_va.floor();
+        let r = end_va.ceil();
+        let mut to_erase = None;
+        for (i, area) in self.areas.iter_mut().enumerate() {
+            if area.vpn_range.get_start() == l && area.vpn_range.get_end() == r {
+                to_erase = Some(i);
+                area.unmap(&mut self.page_table);
+                break;
+            }
+        }
+        if let Some(i) = to_erase {
+            self.areas.remove(i);
+            true
+        } else {
+            false
+        }
+    }
     /// Assume that no conflicts.
     pub fn insert_framed_area(
         &mut self,
