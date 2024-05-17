@@ -15,7 +15,10 @@ mod switch;
 mod task;
 
 use crate::loader::{get_app_data, get_num_app};
+use crate::mm::{MapPermission, VirtAddr};
 use crate::sync::UPSafeCell;
+use crate::syscall::TASK_INFO;
+use crate::timer::{get_time_ms, get_time_us};
 use crate::trap::TrapContext;
 use alloc::vec::Vec;
 use lazy_static::*;
@@ -81,6 +84,7 @@ impl TaskManager {
         next_task.task_status = TaskStatus::Running;
         let next_task_cx_ptr = &next_task.task_cx as *const TaskContext;
         drop(inner);
+        TASK_INFO.exclusive_access()[0].time = get_time_us();
         let mut _unused = TaskContext::zero_init();
         // before this, we should drop local variables that must be dropped manually
         unsafe {
@@ -133,12 +137,39 @@ impl TaskManager {
         inner.tasks[cur].change_program_brk(size)
     }
 
+    /// map a new va_space to current_task
+    pub fn current_task_mmap(&self, start: usize, len: usize, perm: MapPermission) -> isize {
+        let pid = TASK_MANAGER.inner.exclusive_access().current_task;
+        let va_start = VirtAddr::from(start);
+        let va_end = VirtAddr::from(start + len);
+        if TASK_MANAGER.inner.exclusive_access().tasks[pid].memory_set.check_conflict(va_start, va_end) {
+            println!("here");
+            -1
+        } else {
+            TASK_MANAGER.inner.exclusive_access().tasks[pid].memory_set.insert_framed_area(va_start, va_end, perm);
+            0
+        }
+    }
+
+    /// unmap a va_space to current_task
+    pub fn current_task_munmap(&self, start: usize, len: usize) -> isize {
+        let pid = TASK_MANAGER.inner.exclusive_access().current_task;
+        if TASK_MANAGER.inner.exclusive_access().tasks[pid].memory_set.munmap_with_check(start.into(), (start + len).into()) {
+            0
+        } else {
+            -1
+        }
+    }
+
     /// Switch current `Running` task to the task we have found,
     /// or there is no `Ready` task and we can exit with all applications completed
     fn run_next_task(&self) {
         if let Some(next) = self.find_next_task() {
             let mut inner = self.inner.exclusive_access();
             let current = inner.current_task;
+            if inner.tasks[next].task_status == TaskStatus::UnInit {
+                TASK_INFO.exclusive_access()[next].time = get_time_ms();
+            }
             inner.tasks[next].task_status = TaskStatus::Running;
             inner.current_task = next;
             let current_task_cx_ptr = &mut inner.tasks[current].task_cx as *mut TaskContext;
@@ -201,4 +232,19 @@ pub fn current_trap_cx() -> &'static mut TrapContext {
 /// Change the current 'Running' task's program break
 pub fn change_program_brk(size: i32) -> Option<usize> {
     TASK_MANAGER.change_current_program_brk(size)
+}
+
+/// get_current_pid
+pub fn get_current_pid() -> usize {
+    TASK_MANAGER.inner.exclusive_access().current_task
+}
+
+/// map a new va_space to current_task
+pub fn task_mmap(start: usize, len: usize, perm: MapPermission) -> isize {
+    TASK_MANAGER.current_task_mmap(start, len, perm)
+}
+
+/// unmap a va_space to current_task
+pub fn task_munmap(start: usize, len: usize) -> isize {
+    TASK_MANAGER.current_task_munmap(start, len)
 }
