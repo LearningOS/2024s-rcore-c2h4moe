@@ -21,6 +21,13 @@ mod switch;
 #[allow(clippy::module_inception)]
 mod task;
 
+use crate::loader::{get_app_data, get_num_app};
+use crate::mm::{MapPermission, VirtAddr};
+use crate::sync::UPSafeCell;
+use crate::syscall::TASK_INFO;
+use crate::timer::{get_time_ms, get_time_us};
+use crate::trap::TrapContext;
+use alloc::vec::Vec;
 use crate::loader::get_app_data_by_name;
 use alloc::sync::Arc;
 use lazy_static::*;
