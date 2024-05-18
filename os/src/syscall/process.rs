@@ -191,7 +191,6 @@ pub fn sys_task_info(_ti: *mut TaskInfo) -> isize {
         return -1;
     }
     info.time = get_time_ms() - info.time;
-    println!("{}", info.time);
     let data;
     unsafe{
         data = from_raw_parts(&info as *const TaskInfo as usize as *const u8, size_of::<TaskInfo>());
