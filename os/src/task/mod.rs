@@ -22,6 +22,7 @@ mod switch;
 mod task;
 
 
+use crate::config::BIG_STRIDE;
 use crate::mm::{MapPermission, VirtAddr};
 use crate::loader::get_app_data_by_name;
 use crate::syscall::{TaskInfo, TASK_INFO};
@@ -44,9 +45,10 @@ use self::processor::PROCESSOR;
 pub fn suspend_current_and_run_next() {
     // There must be an application running.
     let task = take_current_task().unwrap();
-
     // ---- access current TCB exclusively
     let mut task_inner = task.inner_exclusive_access();
+    let prio = task_inner.priority;
+    task_inner.stride += BIG_STRIDE / prio;
     let task_cx_ptr = &mut task_inner.task_cx as *mut TaskContext;
     // Change status to Ready
     task_inner.task_status = TaskStatus::Ready;
