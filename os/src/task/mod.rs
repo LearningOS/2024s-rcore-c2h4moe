@@ -21,14 +21,10 @@ mod switch;
 #[allow(clippy::module_inception)]
 mod task;
 
-use crate::loader::{get_app_data, get_num_app};
+
 use crate::mm::{MapPermission, VirtAddr};
-use crate::sync::UPSafeCell;
-use crate::syscall::TASK_INFO;
-use crate::timer::{get_time_ms, get_time_us};
-use crate::trap::TrapContext;
-use alloc::vec::Vec;
 use crate::loader::get_app_data_by_name;
+use crate::syscall::{TaskInfo, TASK_INFO};
 use alloc::sync::Arc;
 use lazy_static::*;
 pub use manager::{fetch_task, TaskManager};
@@ -39,9 +35,11 @@ pub use context::TaskContext;
 pub use id::{kstack_alloc, pid_alloc, KernelStack, PidHandle};
 pub use manager::add_task;
 pub use processor::{
-    current_task, current_trap_cx, current_user_token, run_tasks, schedule, take_current_task,
+    current_task, current_trap_cx, current_user_token, run_tasks, schedule, take_current_task, get_current_pid,
     Processor,
 };
+
+use self::processor::PROCESSOR;
 /// Suspend the current 'Running' task and run the next task in task list.
 pub fn suspend_current_and_run_next() {
     // There must be an application running.
@@ -120,5 +118,34 @@ lazy_static! {
 
 ///Add init process to the manager
 pub fn add_initproc() {
+    TASK_INFO.exclusive_access().push((INITPROC.getpid(), TaskInfo::new()));
     add_task(INITPROC.clone());
+}
+
+/// map a new va_space to current_task
+pub fn current_task_mmap(start: usize, len: usize, perm: MapPermission) -> isize {
+    let tcb = PROCESSOR.exclusive_access().current().unwrap();
+    let mut inner = tcb.inner_exclusive_access();
+    let va_start = VirtAddr::from(start);
+    let va_end = VirtAddr::from(start + len);
+    if inner
+    .memory_set
+    .check_conflict(va_start, va_end) {
+        println!("here");
+        -1
+    } else {
+        inner.memory_set.insert_framed_area(va_start, va_end, perm);
+        0
+    }
+}
+
+/// unmap a va_space to current_task
+pub fn current_task_munmap(start: usize, len: usize) -> isize {
+    let tcb = PROCESSOR.exclusive_access().current().unwrap();
+    let mut inner = tcb.inner_exclusive_access();
+    if inner.memory_set.munmap_with_check(start.into(), (start + len).into()) {
+        0
+    } else {
+        -1
+    }
 }

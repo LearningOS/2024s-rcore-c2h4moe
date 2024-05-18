@@ -7,15 +7,8 @@ use lazy_static::lazy_static;
 use alloc::sync::Arc;
 
 use crate::{
-    config::MAX_SYSCALL_NUM,
-    loader::get_app_data_by_name,
-    mm::{translated_refmut, translated_str},
-    task::{
-        add_task, current_task, current_user_token, exit_current_and_run_next,
-        suspend_current_and_run_next, TaskStatus,
-    },
-    config::{MAX_SYSCALL_NUM, PAGE_SIZE}, loader::get_num_app, mm::{translated_byte_buffer, MapPermission}, sync::UPSafeCell, task::{
-        change_program_brk, current_user_token, exit_current_and_run_next, get_current_pid, suspend_current_and_run_next, task_mmap, task_munmap, TaskStatus
+    config::{MAX_SYSCALL_NUM, PAGE_SIZE}, loader::get_app_data_by_name, mm::{translated_byte_buffer, translated_refmut, translated_str, MapPermission}, sync::UPSafeCell, task::{
+        add_task, current_task, current_task_mmap, current_task_munmap, current_user_token, exit_current_and_run_next, get_current_pid, suspend_current_and_run_next, TaskStatus
     }, timer::{get_time_ms, get_time_us}
 };
 
@@ -39,11 +32,12 @@ pub struct TaskInfo {
 }
 
 impl TaskInfo {
+    /// create a new task info entry
     pub fn new() -> Self {
         TaskInfo {
             status: TaskStatus::Running,
             syscall_times: [0; MAX_SYSCALL_NUM],
-            time: 0
+            time: get_time_ms()
         }
     }
 }
@@ -51,14 +45,9 @@ impl TaskInfo {
 
 lazy_static! {
     /// the task info of all apps
-    pub static ref TASK_INFO: UPSafeCell<Vec<TaskInfo>> = {
-        let mut info = Vec::new();
-        let n = get_num_app();
-        for _ in 0..n {
-            info.push(TaskInfo::new());
-        }
+    pub static ref TASK_INFO: UPSafeCell<Vec<(usize, TaskInfo)>> = {
         unsafe{
-            UPSafeCell::new(info)
+            UPSafeCell::new(Vec::new())
         }
     };
 }
@@ -84,9 +73,16 @@ pub fn sys_getpid() -> isize {
 
 pub fn sys_fork() -> isize {
     trace!("kernel:pid[{}] sys_fork", current_task().unwrap().pid.0);
+    let cur_pid = current_task().unwrap().pid.0;
     let current_task = current_task().unwrap();
     let new_task = current_task.fork();
     let new_pid = new_task.pid.0;
+    let new_ti = TASK_INFO
+    .exclusive_access()
+    .iter()
+    .find(|(id, _)| *id == cur_pid)
+    .unwrap().1.clone();
+    TASK_INFO.exclusive_access().push((new_pid, new_ti));
     // modify trap context of new_task, because it returns immediately after switching
     let trap_cx = new_task.inner_exclusive_access().get_trap_cx();
     // we do not have to move to next instruction since we have done it before
@@ -99,11 +95,17 @@ pub fn sys_fork() -> isize {
 
 pub fn sys_exec(path: *const u8) -> isize {
     trace!("kernel:pid[{}] sys_exec", current_task().unwrap().pid.0);
+    let pid = current_task().unwrap().pid.0;
     let token = current_user_token();
     let path = translated_str(token, path);
     if let Some(data) = get_app_data_by_name(path.as_str()) {
         let task = current_task().unwrap();
         task.exec(data);
+        TASK_INFO
+        .exclusive_access()
+        .iter_mut()
+        .find(|(id, _)| *id == pid)
+        .unwrap().1 = TaskInfo::new();
         0
     } else {
         -1
@@ -176,11 +178,24 @@ pub fn sys_get_time(_ts: *mut TimeVal, _tz: usize) -> isize {
 /// HINT: You might reimplement it with virtual memory management.
 /// HINT: What if [`TaskInfo`] is splitted by two pages ?
 pub fn sys_task_info(_ti: *mut TaskInfo) -> isize {
+    println!("here");
     let pid = get_current_pid();
+    println!("{}", pid);
     let token = current_user_token();
     let pspace = translated_byte_buffer(token, _ti as *const u8, size_of::<TaskInfo>());
-    let mut info = TASK_INFO.exclusive_access()[pid].clone();
+    let mut info;
+    println!("{}", TASK_INFO.exclusive_access().is_empty());
+    if let Some((_, ti)) = TASK_INFO
+    .exclusive_access()
+    .iter()
+    .find(|(id, _)| *id == pid) {
+        info = ti.clone();
+    } else {
+        return -1;
+    }
+    println!("{:?}", info.status);
     info.time = get_time_ms() - info.time;
+    println!("{}", info.time);
     let data;
     unsafe{
         data = from_raw_parts(&info as *const TaskInfo as usize as *const u8, size_of::<TaskInfo>());
@@ -209,7 +224,7 @@ pub fn sys_mmap(_start: usize, _len: usize, _port: usize) -> isize {
         if (_port & 4) != 0{
             perm = perm.union(MapPermission::X);
         }
-        task_mmap(_start, _len, perm)
+        current_task_mmap(_start, _len, perm)
     }
 }
 
@@ -218,7 +233,7 @@ pub fn sys_munmap(_start: usize, _len: usize) -> isize {
     if (_start & (PAGE_SIZE - 1)) != 0 {
         -1
     } else {
-        task_munmap(_start, _len)
+        current_task_munmap(_start, _len)
     }
 }
 

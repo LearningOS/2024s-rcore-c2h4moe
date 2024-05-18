@@ -45,11 +45,18 @@ mod process;
 
 use fs::*;
 use process::*;
-pub use process::TASK_INFO;
+pub use process::{TaskInfo, TASK_INFO};
+
 use crate::task::get_current_pid;
 /// handle syscall exception with `syscall_id` and other arguments
 pub fn syscall(syscall_id: usize, args: [usize; 3]) -> isize {
-    TASK_INFO.exclusive_access()[get_current_pid()].syscall_times[syscall_id] += 1;
+    let pid = get_current_pid();
+    if let Some((_, info)) = TASK_INFO
+    .exclusive_access()
+    .iter_mut()
+    .find(|(id, _)| *id == pid) {
+        info.syscall_times[syscall_id] += 1;
+    }
     match syscall_id {
         SYSCALL_READ => sys_read(args[0], args[1] as *const u8, args[2]),
         SYSCALL_WRITE => sys_write(args[0], args[1] as *const u8, args[2]),
