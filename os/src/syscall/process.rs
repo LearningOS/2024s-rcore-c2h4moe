@@ -36,11 +36,12 @@ pub struct TaskInfo {
 }
 
 impl TaskInfo {
+    /// create a new task info entry
     pub fn new() -> Self {
         TaskInfo {
             status: TaskStatus::Running,
             syscall_times: [0; MAX_SYSCALL_NUM],
-            time: 0
+            time: get_time_ms()
         }
     }
 }
@@ -51,7 +52,7 @@ lazy_static! {
     pub static ref TASK_INFO: UPSafeCell<Vec<(usize, TaskInfo)>> = {
         let info = Vec::new();
         unsafe{
-            UPSafeCell::new(info)
+            UPSafeCell::new(Vec::new())
         }
     };
 }
@@ -76,9 +77,16 @@ pub fn sys_getpid() -> isize {
 
 pub fn sys_fork() -> isize {
     trace!("kernel:pid[{}] sys_fork", current_task().unwrap().pid.0);
+    let cur_pid = current_task().unwrap().pid.0;
     let current_task = current_task().unwrap();
     let new_task = current_task.fork();
     let new_pid = new_task.pid.0;
+    let new_ti = TASK_INFO
+    .exclusive_access()
+    .iter()
+    .find(|(id, _)| *id == cur_pid)
+    .unwrap().1.clone();
+    TASK_INFO.exclusive_access().push((new_pid, new_ti));
     // modify trap context of new_task, because it returns immediately after switching
     let trap_cx = new_task.inner_exclusive_access().get_trap_cx();
     // we do not have to move to next instruction since we have done it before
@@ -91,6 +99,7 @@ pub fn sys_fork() -> isize {
 
 pub fn sys_exec(path: *const u8) -> isize {
     trace!("kernel:pid[{}] sys_exec", current_task().unwrap().pid.0);
+    let pid = current_task().unwrap().pid.0;
     let token = current_user_token();
     let path = translated_str(token, path);
     if let Some(app_inode) = open_file(path.as_str(), OpenFlags::RDONLY) {
@@ -182,6 +191,7 @@ pub fn sys_task_info(_ti: *mut TaskInfo) -> isize {
         return -1;
     }
     info.time = get_time_ms() - info.time;
+    println!("{}", info.time);
     let data;
     unsafe{
         data = from_raw_parts(&info as *const TaskInfo as usize as *const u8, size_of::<TaskInfo>());
@@ -210,7 +220,7 @@ pub fn sys_mmap(_start: usize, _len: usize, _port: usize) -> isize {
         if (_port & 4) != 0{
             perm = perm.union(MapPermission::X);
         }
-        task_mmap(_start, _len, perm)
+        current_task_mmap(_start, _len, perm)
     }
 }
 
@@ -219,7 +229,7 @@ pub fn sys_munmap(_start: usize, _len: usize) -> isize {
     if (_start & (PAGE_SIZE - 1)) != 0 {
         -1
     } else {
-        task_munmap(_start, _len)
+        current_task_munmap(_start, _len)
     }
 }
 

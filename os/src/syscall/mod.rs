@@ -56,7 +56,8 @@ mod process;
 
 use fs::*;
 use process::*;
-pub use process::TASK_INFO;
+pub use process::{TaskInfo, TASK_INFO};
+
 use crate::task::get_current_pid;
 /// handle syscall exception with `syscall_id` and other arguments
 pub fn syscall(syscall_id: usize, args: [usize; 4]) -> isize {
