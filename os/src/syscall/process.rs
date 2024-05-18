@@ -7,16 +7,13 @@ use lazy_static::lazy_static;
 use alloc::sync::Arc;
 
 use crate::{
-    config::MAX_SYSCALL_NUM,
     fs::{open_file, OpenFlags},
     mm::{translated_refmut, translated_str},
     task::{
         add_task, current_task, current_user_token, exit_current_and_run_next,
         suspend_current_and_run_next, TaskStatus,
     },
-    config::{MAX_SYSCALL_NUM, PAGE_SIZE}, loader::get_num_app, mm::{translated_byte_buffer, MapPermission}, sync::UPSafeCell, task::{
-        change_program_brk, current_user_token, exit_current_and_run_next, get_current_pid, suspend_current_and_run_next, task_mmap, task_munmap, TaskStatus
-    }, timer::{get_time_ms, get_time_us}
+    config::{MAX_SYSCALL_NUM, PAGE_SIZE}, mm::{translated_byte_buffer, MapPermission}, sync::UPSafeCell, timer::{get_time_ms, get_time_us}
 };
 
 #[repr(C)]
@@ -51,12 +48,8 @@ impl TaskInfo {
 
 lazy_static! {
     /// the task info of all apps
-    pub static ref TASK_INFO: UPSafeCell<Vec<TaskInfo>> = {
-        let mut info = Vec::new();
-        let n = get_num_app();
-        for _ in 0..n {
-            info.push(TaskInfo::new());
-        }
+    pub static ref TASK_INFO: UPSafeCell<Vec<(usize, TaskInfo)>> = {
+        let info = Vec::new();
         unsafe{
             UPSafeCell::new(info)
         }
@@ -176,7 +169,7 @@ pub fn sys_get_time(_ts: *mut TimeVal, _tz: usize) -> isize {
 /// HINT: You might reimplement it with virtual memory management.
 /// HINT: What if [`TaskInfo`] is splitted by two pages ?
 pub fn sys_task_info(_ti: *mut TaskInfo) -> isize {
-    let pid = get_current_pid();
+    let pid = get_current_;
     let token = current_user_token();
     let pspace = translated_byte_buffer(token, _ti as *const u8, size_of::<TaskInfo>());
     let mut info;
@@ -243,18 +236,26 @@ pub fn sys_sbrk(size: i32) -> isize {
 /// YOUR JOB: Implement spawn.
 /// HINT: fork + exec =/= spawn
 pub fn sys_spawn(_path: *const u8) -> isize {
-    trace!(
-        "kernel:pid[{}] sys_spawn NOT IMPLEMENTED",
-        current_task().unwrap().pid.0
-    );
-    -1
+    let cur_token = current_user_token();
+    let cur_app = current_task().unwrap();
+    let path = translated_str(cur_token, _path);
+    let app = get_app_data_by_name(&path);
+    if let Some(data) = app {
+        let new_app = cur_app.spawn(data);
+        let pid = new_app.getpid() as isize;
+        add_task(new_app);
+        pid
+    } else {
+        -1
+    }
 }
 
 // YOUR JOB: Set task priority.
 pub fn sys_set_priority(_prio: isize) -> isize {
-    trace!(
-        "kernel:pid[{}] sys_set_priority NOT IMPLEMENTED",
-        current_task().unwrap().pid.0
-    );
-    -1
+    if _prio < 2 {
+        -1
+    } else {
+        current_task().unwrap().inner_exclusive_access().priority = _prio as usize;
+        _prio
+    }
 }

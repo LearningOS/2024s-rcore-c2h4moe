@@ -71,6 +71,12 @@ pub struct TaskControlBlockInner {
 
     /// Program break
     pub program_brk: usize,
+
+    /// priority value
+    pub stride: usize,
+
+    /// pass value
+    pub priority: usize,
 }
 
 impl TaskControlBlockInner {
@@ -135,6 +141,8 @@ impl TaskControlBlock {
                     ],
                     heap_bottom: user_sp,
                     program_brk: user_sp,
+                    stride: 0,
+                    priority: 16,
                 })
             },
         };
@@ -161,6 +169,9 @@ impl TaskControlBlock {
 
         // **** access current TCB exclusively
         let mut inner = self.inner_exclusive_access();
+
+        inner.priority = 16;
+        inner.stride = 0;
         // substitute memory_set
         inner.memory_set = memory_set;
         // update trap_cx ppn
@@ -216,6 +227,8 @@ impl TaskControlBlock {
                     fd_table: new_fd_table,
                     heap_bottom: parent_inner.heap_bottom,
                     program_brk: parent_inner.program_brk,
+                    stride: parent_inner.stride,
+                    priority: parent_inner.priority,
                 })
             },
         });
@@ -231,6 +244,48 @@ impl TaskControlBlock {
         // ---- release parent PCB
     }
 
+    /// spawn a new process
+    pub fn spawn(self: &Arc<Self>, elf_data: &[u8]) -> Arc<TaskControlBlock> {
+        let (memory_set, user_sp, entry_point) = MemorySet::from_elf(elf_data);
+        let trap_cx_ppn = memory_set
+            .translate(VirtAddr::from(TRAP_CONTEXT_BASE).into())
+            .unwrap()
+            .ppn();
+
+        
+        let kernel_stack = kstack_alloc();
+        let new_pid = pid_alloc();
+        let mut par_inner = self.inner_exclusive_access();
+        let new_inner = unsafe {
+            UPSafeCell::new(TaskControlBlockInner {
+                trap_cx_ppn,
+                base_size: user_sp,
+                task_cx: TaskContext::goto_trap_return(kernel_stack.get_top()),
+                task_status: TaskStatus::UnInit,
+                memory_set,
+                parent: Some(Arc::downgrade(self)),
+                children: Vec::new(),
+                exit_code: 0,
+                heap_bottom: par_inner.heap_bottom,
+                program_brk: par_inner.program_brk,
+                stride: 0,
+                priority: 16,
+            })
+        };
+        let trap_cx = new_inner.exclusive_access().get_trap_cx();
+        *trap_cx = TrapContext::app_init_context(entry_point, user_sp
+            , KERNEL_SPACE.exclusive_access().token()
+            , kernel_stack.get_top()
+            , trap_handler as usize);
+        let new_proc = Arc::new(TaskControlBlock {
+            pid: new_pid,
+            kernel_stack,
+            inner: new_inner,
+        });
+
+        par_inner.children.push(new_proc.clone());
+        new_proc
+    }
     /// get pid of process
     pub fn getpid(&self) -> usize {
         self.pid.0
