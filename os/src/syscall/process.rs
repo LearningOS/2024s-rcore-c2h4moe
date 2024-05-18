@@ -178,13 +178,10 @@ pub fn sys_get_time(_ts: *mut TimeVal, _tz: usize) -> isize {
 /// HINT: You might reimplement it with virtual memory management.
 /// HINT: What if [`TaskInfo`] is splitted by two pages ?
 pub fn sys_task_info(_ti: *mut TaskInfo) -> isize {
-    println!("here");
     let pid = get_current_pid();
-    println!("{}", pid);
     let token = current_user_token();
     let pspace = translated_byte_buffer(token, _ti as *const u8, size_of::<TaskInfo>());
     let mut info;
-    println!("{}", TASK_INFO.exclusive_access().is_empty());
     if let Some((_, ti)) = TASK_INFO
     .exclusive_access()
     .iter()
@@ -193,9 +190,7 @@ pub fn sys_task_info(_ti: *mut TaskInfo) -> isize {
     } else {
         return -1;
     }
-    println!("{:?}", info.status);
     info.time = get_time_ms() - info.time;
-    println!("{}", info.time);
     let data;
     unsafe{
         data = from_raw_parts(&info as *const TaskInfo as usize as *const u8, size_of::<TaskInfo>());
