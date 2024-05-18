@@ -179,7 +179,15 @@ pub fn sys_task_info(_ti: *mut TaskInfo) -> isize {
     let pid = get_current_pid();
     let token = current_user_token();
     let pspace = translated_byte_buffer(token, _ti as *const u8, size_of::<TaskInfo>());
-    let mut info = TASK_INFO.exclusive_access()[pid].clone();
+    let mut info;
+    if let Some((_, ti)) = TASK_INFO
+    .exclusive_access()
+    .iter()
+    .find(|(id, _)| *id == pid) {
+        info = ti.clone();
+    } else {
+        return -1;
+    }
     info.time = get_time_ms() - info.time;
     let data;
     unsafe{
