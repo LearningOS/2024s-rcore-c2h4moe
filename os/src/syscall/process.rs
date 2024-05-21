@@ -7,13 +7,9 @@ use lazy_static::lazy_static;
 use alloc::sync::Arc;
 
 use crate::{
-    fs::{open_file, OpenFlags},
-    mm::{translated_refmut, translated_str},
-    task::{
-        add_task, current_task, current_user_token, exit_current_and_run_next,
-        suspend_current_and_run_next, TaskStatus,
-    },
-    config::{MAX_SYSCALL_NUM, PAGE_SIZE}, mm::{translated_byte_buffer, MapPermission}, sync::UPSafeCell, timer::{get_time_ms, get_time_us}
+    config::{MAX_SYSCALL_NUM, PAGE_SIZE}, fs::{open_file, OpenFlags}, mm::{translated_byte_buffer, translated_refmut, translated_str, MapPermission}, sync::UPSafeCell, task::{
+        add_task, current_task, current_task_mmap, current_task_munmap, current_user_token, exit_current_and_run_next, get_current_pid, suspend_current_and_run_next, TaskStatus
+    }, timer::{get_time_ms, get_time_us}
 };
 
 #[repr(C)]
@@ -50,7 +46,6 @@ impl TaskInfo {
 lazy_static! {
     /// the task info of all apps
     pub static ref TASK_INFO: UPSafeCell<Vec<(usize, TaskInfo)>> = {
-        let info = Vec::new();
         unsafe{
             UPSafeCell::new(Vec::new())
         }
@@ -99,7 +94,6 @@ pub fn sys_fork() -> isize {
 
 pub fn sys_exec(path: *const u8) -> isize {
     trace!("kernel:pid[{}] sys_exec", current_task().unwrap().pid.0);
-    let pid = current_task().unwrap().pid.0;
     let token = current_user_token();
     let path = translated_str(token, path);
     if let Some(app_inode) = open_file(path.as_str(), OpenFlags::RDONLY) {
@@ -178,7 +172,7 @@ pub fn sys_get_time(_ts: *mut TimeVal, _tz: usize) -> isize {
 /// HINT: You might reimplement it with virtual memory management.
 /// HINT: What if [`TaskInfo`] is splitted by two pages ?
 pub fn sys_task_info(_ti: *mut TaskInfo) -> isize {
-    let pid = get_current_;
+    let pid = get_current_pid();
     let token = current_user_token();
     let pspace = translated_byte_buffer(token, _ti as *const u8, size_of::<TaskInfo>());
     let mut info;
@@ -248,9 +242,10 @@ pub fn sys_spawn(_path: *const u8) -> isize {
     let cur_token = current_user_token();
     let cur_app = current_task().unwrap();
     let path = translated_str(cur_token, _path);
-    let app = get_app_data_by_name(&path);
+    let app = open_file(&path, OpenFlags::RDONLY);
     if let Some(data) = app {
-        let new_app = cur_app.spawn(data);
+        let data = data.read_all();
+        let new_app = cur_app.spawn(&data);
         let pid = new_app.getpid() as isize;
         add_task(new_app);
         pid

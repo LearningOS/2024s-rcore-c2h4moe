@@ -4,7 +4,7 @@
 //!
 //! `UPSafeCell<OSInodeInner>` -> `OSInode`: for static `ROOT_INODE`,we
 //! need to wrap `OSInodeInner` into `UPSafeCell`
-use super::File;
+use super::{File, Stat, StatMode};
 use crate::drivers::BLOCK_DEVICE;
 use crate::mm::UserBuffer;
 use crate::sync::UPSafeCell;
@@ -20,6 +20,7 @@ use lazy_static::*;
 pub struct OSInode {
     readable: bool,
     writable: bool,
+    inode: u32,
     inner: UPSafeCell<OSInodeInner>,
 }
 /// The OS inode inner in 'UPSafeCell'
@@ -30,10 +31,11 @@ pub struct OSInodeInner {
 
 impl OSInode {
     /// create a new inode in memory
-    pub fn new(readable: bool, writable: bool, inode: Arc<Inode>) -> Self {
+    pub fn new(readable: bool, writable: bool, inode_id: u32, inode: Arc<Inode>) -> Self {
         Self {
             readable,
             writable,
+            inode: inode_id,
             inner: unsafe { UPSafeCell::new(OSInodeInner { offset: 0, inode }) },
         }
     }
@@ -55,6 +57,7 @@ impl OSInode {
 }
 
 lazy_static! {
+    /// The root directory
     pub static ref ROOT_INODE: Arc<Inode> = {
         let efs = EasyFileSystem::open(BLOCK_DEVICE.clone());
         Arc::new(EasyFileSystem::root_inode(&efs))
@@ -106,20 +109,26 @@ pub fn open_file(name: &str, flags: OpenFlags) -> Option<Arc<OSInode>> {
     if flags.contains(OpenFlags::CREATE) {
         if let Some(inode) = ROOT_INODE.find(name) {
             // clear size
+            let id = ROOT_INODE.find_id(name).unwrap();
             inode.clear();
-            Some(Arc::new(OSInode::new(readable, writable, inode)))
+            Some(Arc::new(OSInode::new(readable, writable, id, inode)))
         } else {
             // create file
-            ROOT_INODE
-                .create(name)
-                .map(|inode| Arc::new(OSInode::new(readable, writable, inode)))
+            if let Some(new_inode) = ROOT_INODE.create(name) {
+                let id = ROOT_INODE.find_id(name).unwrap();
+                Some(Arc::new(OSInode::new(readable, writable, id, new_inode)))
+            } else {
+                None
+            }
+            
         }
     } else {
         ROOT_INODE.find(name).map(|inode| {
+            let id = ROOT_INODE.find_id(name).unwrap();
             if flags.contains(OpenFlags::TRUNC) {
                 inode.clear();
             }
-            Arc::new(OSInode::new(readable, writable, inode))
+            Arc::new(OSInode::new(readable, writable, id, inode))
         })
     }
 }
@@ -154,5 +163,15 @@ impl File for OSInode {
             total_write_size += write_size;
         }
         total_write_size
+    }
+    fn stat(&self) -> Stat {
+        let inner = self.inner.exclusive_access();
+        let mode;
+        if inner.inode.is_dir() {
+            mode = StatMode::DIR;
+        } else {
+            mode = StatMode::FILE;
+        }
+        Stat { dev: 0, ino: self.inode.into(), mode, nlink: inner.inode.num_links().into(), pad: [0; 7] }
     }
 }

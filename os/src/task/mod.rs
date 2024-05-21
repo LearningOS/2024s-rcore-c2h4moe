@@ -25,6 +25,8 @@ mod task;
 use crate::fs::{open_file, OpenFlags};
 
 use crate::config::BIG_STRIDE;
+use crate::mm::{MapPermission, VirtAddr};
+use crate::syscall::{TaskInfo, TASK_INFO};
 use alloc::sync::Arc;
 pub use context::TaskContext;
 use lazy_static::*;

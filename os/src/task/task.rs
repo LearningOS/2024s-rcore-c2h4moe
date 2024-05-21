@@ -270,6 +270,14 @@ impl TaskControlBlock {
                 program_brk: par_inner.program_brk,
                 stride: 0,
                 priority: 16,
+                fd_table: vec![
+                        // 0 -> stdin
+                        Some(Arc::new(Stdin)),
+                        // 1 -> stdout
+                        Some(Arc::new(Stdout)),
+                        // 2 -> stderr
+                        Some(Arc::new(Stdout)),
+                    ],
             })
         };
         let trap_cx = new_inner.exclusive_access().get_trap_cx();
